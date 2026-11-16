@@ -1,0 +1,128 @@
+Menu="Utilities"
+Type="xmenu"
+Title="Opsboard"
+Icon="check-square-o"
+Tag="check-square-o"
+Markdown="false"
+---
+<?php
+// Opsboard: an optional self-check result, plus Check / GO buttons for the jobs in the settings file.
+// Opening this page runs nothing. Every job starts only from a button, and every GO needs a
+// finished dry run of the same job first (enforced in include/action.php).
+require_once '/usr/local/emhttp/plugins/opsboard/include/lib.php';
+$cfg = opb_cfg();
+$check = opb_check();
+$last = opb_last();
+$lvl = opb_level($last);
+$csrf = $var['csrf_token'] ?? '';
+$jobs = opb_jobs();
+$word = ['ok' => 'All automated checks passed', 'warn' => 'Warnings', 'fail' => 'Failures', 'none' => 'No self-check has run yet'];
+?>
+<style>
+.ob-banner{display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:6px;margin:8px 0 14px;border:2px solid}
+.ob-banner b{font-size:1.25em}
+.ob-ok{border-color:#3c9a3c;background:color-mix(in srgb,#3c9a3c 12%,transparent)}
+.ob-warn{border-color:#e0a020;background:color-mix(in srgb,#e0a020 14%,transparent)}
+.ob-fail{border-color:#e03c3c;background:color-mix(in srgb,#e03c3c 14%,transparent)}
+.ob-none{border-color:#888}
+.ob-checks{width:100%;border-collapse:collapse;margin-bottom:18px}
+.ob-checks td{padding:4px 8px;border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent);vertical-align:top}
+.ob-st{font-weight:700;width:70px;text-align:center;border-radius:3px}
+.ob-st.PASS{color:#3c9a3c}.ob-st.WARN{color:#e0a020}.ob-st.FAIL{color:#e03c3c}.ob-st.MANUAL{opacity:.6}
+.ob-jobs{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px}
+.ob-job{border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:6px;padding:10px 12px}
+.ob-job h3{margin:0 0 4px;font-size:1.05em}
+.ob-job p{margin:0 0 8px;opacity:.8;font-size:.92em}
+.ob-job pre,.ob-out{max-height:260px;overflow:auto;font-size:.82em;background:color-mix(in srgb,currentColor 6%,transparent);padding:6px;border-radius:4px;white-space:pre-wrap;display:none;margin-top:8px}
+.ob-msg{margin-left:8px;font-size:.9em;opacity:.85}
+.ob-go{background:#b33 !important;color:#fff !important}
+.ob-go:disabled{opacity:.35}
+</style>
+
+<h2 style="margin:6px 0 4px"><?=opb_h(opb_title())?></h2>
+<?php if (!$cfg): ?>
+<p>No settings yet. Opsboard reads its jobs from <code><?=opb_h(OB_CFG)?></code>; see the README for the format.</p>
+<?php else: ?>
+
+<?php if ($check): ?>
+<div class="ob-banner ob-<?=$lvl?>">
+  <div><b><?=opb_h($last['result'] ?? $word[$lvl])?></b><br>
+  <span><?=$last ? opb_h($word[$lvl]) . ' &middot; ' . opb_h(opb_ago($last['at'] ?? '')) : 'Click ' . opb_h($check['label'] ?? 'Run all checks') . '.'?></span></div>
+  <div style="margin-left:auto"><input type="button" value="<?=opb_h($check['label'] ?? 'Run all checks')?>" onclick="obCheck(this)"><span class="ob-msg" id="ob-check-msg"></span></div>
+</div>
+<pre class="ob-out" id="ob-check-out"></pre>
+<?php if ($last): ?>
+<table class="ob-checks">
+<?php foreach (($last['checks'] ?? []) as $c): ?>
+<tr><td class="ob-st <?=opb_h($c['status'] ?? '')?>"><?=opb_h($c['status'] ?? '')?></td><td style="width:34px"><?=opb_h($c['item'] ?? '')?></td>
+<td style="width:220px"><?=opb_h($c['name'] ?? '')?></td><td><?=opb_h($c['detail'] ?? '')?></td></tr>
+<?php endforeach; ?>
+</table>
+<?php endif; ?>
+<?php if (!empty($check['note'])): ?><p style="opacity:.75"><?=opb_h($check['note'])?></p><?php endif; ?>
+<?php endif; ?>
+
+<h2 style="margin-top:18px">Jobs</h2>
+<p style="opacity:.75">Run the dry run / check first and read it. GO unlocks for <?=(int)(opb_window() / 60)?> minutes after a finished dry run.</p>
+<div class="ob-jobs">
+<?php foreach ($jobs as $k => $j): $hasGo = opb_command($k, 'go') !== null; $hasRb = opb_command($k, 'rollback') !== null; ?>
+<div class="ob-job" id="ob-<?=$k?>">
+  <h3><?=opb_h($j['label'] ?? $k)?></h3><p><?=opb_h($j['desc'] ?? '')?></p>
+  <input type="button" value="<?=$hasGo ? 'Dry run / check' : 'Check'?>" onclick="obRun('<?=$k?>','dry')">
+  <?php if ($hasGo): ?><input type="button" class="ob-go" value="GO" disabled onclick="obRun('<?=$k?>','go')"><?php endif; ?>
+  <?php if ($hasRb): ?><input type="button" class="ob-rb" value="Roll back" disabled onclick="obRun('<?=$k?>','rollback')"><?php endif; ?>
+  <span class="ob-msg"></span>
+  <pre></pre>
+</div>
+<?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<script>
+const obCsrf = <?=json_encode($csrf)?>;
+async function obPost(data){
+  const f = new URLSearchParams(); f.append('csrf_token', obCsrf); for (const k in data) f.append(k, data[k]);
+  try { const r = await fetch('/plugins/opsboard/include/action.php', {method:'POST', body:f}); return await r.json(); }
+  catch(e){ return {ok:false, msg:'failed: '+e}; }
+}
+// Self-check: start it, show its output live, reload the page when it finishes.
+async function obCheck(btn){
+  btn.disabled = true; const out = document.getElementById('ob-check-out'); const msg = document.getElementById('ob-check-msg');
+  const j = await obPost({action:'check'}); msg.textContent = j.msg; if (!j.ok) { btn.disabled = false; return; }
+  out.style.display = 'block';
+  const t = setInterval(async () => {
+    const s = await obPost({action:'check_status'}); out.textContent = s.log || ''; out.scrollTop = out.scrollHeight;
+    if (!s.running) { clearInterval(t); msg.textContent = 'done - reloading'; setTimeout(() => location.reload(), 1200); }
+  }, 2000);
+}
+// A job: GO and Roll back ask for confirmation; output streams into the card.
+async function obRun(job, mode){
+  if (mode !== 'dry' && !confirm('Run ' + (mode === 'go' ? 'GO' : 'Roll back') + ' for "' + document.querySelector('#ob-'+job+' h3').textContent + '"? Did you read the dry run?')) return;
+  const box = document.getElementById('ob-'+job); const msg = box.querySelector('.ob-msg');
+  const j = await obPost({action:'run', job, mode}); msg.textContent = j.msg;
+  if (j.ok) obWatch(job, mode);
+}
+function obWatch(job, mode){
+  const box = document.getElementById('ob-'+job), pre = box.querySelector('pre'), msg = box.querySelector('.ob-msg');
+  pre.style.display = 'block';
+  const t = setInterval(async () => {
+    const s = await obPost({action:'status', job}); if (!s.ok) return;
+    const m = s.modes[mode]; pre.textContent = m.log || ''; pre.scrollTop = pre.scrollHeight;
+    obButtons(job, s);
+    if (!m.running) { clearInterval(t); msg.textContent = mode + ' finished'; }
+  }, 2000);
+}
+function obButtons(job, s){
+  const box = document.getElementById('ob-'+job);
+  const go = box.querySelector('.ob-go'), rb = box.querySelector('.ob-rb');
+  if (go) go.disabled = !s.go_ready; if (rb) rb.disabled = !s.go_ready;
+}
+// On load: unlock GO where a recent dry run finished, and show any job still running.
+document.addEventListener('DOMContentLoaded', async () => {
+  for (const job of <?=json_encode(array_keys($jobs))?>) {
+    const s = await obPost({action:'status', job}); if (!s.ok) continue;
+    obButtons(job, s);
+    for (const m of ['dry','go','rollback']) if (s.modes[m].running) obWatch(job, m);
+  }
+});
+</script>

@@ -1,0 +1,40 @@
+Menu="Dashboard:0"
+Cond="version_compare(parse_ini_file('/etc/unraid-version')['version'],'6.12.0', '>=') && is_file('/boot/config/plugins/opsboard/opsboard.json')"
+Markdown="false"
+---
+<?php
+// Opsboard Dashboard tile: the last self-check result at a glance. Reads a file only; runs nothing.
+require_once '/usr/local/emhttp/plugins/opsboard/include/lib.php';
+if (opb_check()):
+$obLast = opb_last(); $obLvl = opb_level($obLast); $obT = opb_h(opb_title());
+$obN = ['FAIL' => 0, 'WARN' => 0, 'PASS' => 0, 'MANUAL' => 0];
+foreach (($obLast['checks'] ?? []) as $c) $obN[$c['status'] ?? ''] = ($obN[$c['status'] ?? ''] ?? 0) + 1;
+$obColor = ['ok' => '#3c9a3c', 'warn' => '#e0a020', 'fail' => '#e03c3c', 'none' => '#888'][$obLvl];
+$obSum = $obLast ? opb_h($obLast['result'] ?? '') . ' &middot; ' . opb_h(opb_ago($obLast['at'] ?? '')) : 'no self-check yet';
+$obBad = '';
+foreach (($obLast['checks'] ?? []) as $c) if (($c['status'] ?? '') === 'FAIL' || ($c['status'] ?? '') === 'WARN')
+  $obBad .= "<div style='margin:2px 0'><b style='color:" . ($c['status'] === 'FAIL' ? '#e03c3c' : '#e0a020') . "'>{$c['status']}</b> "
+          . opb_h($c['item'] ?? '') . ' ' . opb_h($c['name'] ?? '') . "</div>";
+if ($obLast && !$obBad) $obBad = "<div>All automated checks passed.</div>";
+
+$obVer = @parse_ini_file('/etc/unraid-version')['version'] ?? '0';
+$obLink = "<a href='/Utilities/Opsboard' title='Open $obT'><i class='fa fa-fw fa-external-link control'></i></a>";
+$obHead = version_compare($obVer, '7.2.0-beta', '>=')
+  ? "<span class='tile-header'><span class='tile-header-left'><i class='fa fa-check-square-o f32'></i><div class='section'><h3 class='tile-header-main'>$obT</h3><span>$obSum</span></div></span>"
+    . "<span class='tile-header-right'><span class='tile-header-right-controls'>$obLink</span></span></span>"
+  : "<i class='fa fa-check-square-o f32'></i><div class='section'>$obT<br><span>$obSum</span></div>$obLink";
+
+$mytiles['opsboard']['column1'] = <<<EOT
+<tbody id="db-opsboard" class="sortable" title="$obT">
+<tr><td>$obHead</td></tr>
+<tr><td>
+<a href="/Utilities/Opsboard" style="text-decoration:none;color:inherit;display:block">
+<div style="border-left:6px solid $obColor;padding:4px 10px;font-size:.92em">
+<div style="margin-bottom:4px">{$obN['FAIL']} fail &middot; {$obN['WARN']} warn &middot; {$obN['PASS']} pass &middot; {$obN['MANUAL']} by hand</div>
+$obBad
+</div></a>
+</td></tr>
+</tbody>
+EOT;
+endif;
+?>

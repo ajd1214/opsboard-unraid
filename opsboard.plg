@@ -1,0 +1,48 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name      "opsboard">
+<!ENTITY author    "ajd1214">
+<!ENTITY version   "2026.11.16">
+<!ENTITY launch    "Utilities/Opsboard">
+<!ENTITY gitURL    "https://raw.githubusercontent.com/ajd1214/opsboard-unraid/main">
+<!ENTITY pluginURL "&gitURL;/opsboard.plg">
+<!ENTITY plgPATH   "/boot/config/plugins/&name;">
+<!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
+<!ENTITY pkgSHA    "3893cbd647a62e689de8133953e947ef528eb542830634ffc43473d752a053e6">
+]>
+<PLUGIN name="&name;"
+        author="&author;"
+        version="&version;"
+        launch="&launch;"
+        pluginURL="&pluginURL;"
+        icon="check-square-o"
+        min="6.12.0">
+
+<CHANGES>
+###2026.11.16
+- First release: a self-check result and Check / GO job buttons, all read from /boot/config/plugins/opsboard/opsboard.json
+</CHANGES>
+
+<FILE Name="&plgPATH;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&gitURL;/packages/&name;-&version;.txz</URL>
+<SHA256>&pkgSHA;</SHA256>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE>
+P=&plgPATH;
+mkdir -p "$P"
+for f in "$P"/&name;-*.txz; do [ "$f" = "$P/&name;-&version;.txz" ] || rm -f "$f"; done
+[ -f "$P/opsboard.json" ] &amp;&amp; echo "Opsboard &version; installed. Settings: $P/opsboard.json" \
+  || echo "Opsboard &version; installed. No settings yet: see the README for $P/opsboard.json"
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+removepkg "&plgPATH;/&name;-&version;.txz" >/dev/null 2>&amp;1
+rm -rf "&emhttp;" /tmp/opsboard
+echo "Opsboard removed. Its settings file (&plgPATH;/opsboard.json) is kept."
+</INLINE>
+</FILE>
+</PLUGIN>
